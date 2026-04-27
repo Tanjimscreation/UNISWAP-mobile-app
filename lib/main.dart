@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
+import 'screens/dashboard_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/registration_screen.dart';
@@ -36,6 +37,7 @@ class UniSwapApp extends StatelessWidget {
           '/': (_) => const SplashScreen(),
           '/login': (_) => const LoginScreen(),
           '/registration': (_) => const RegistrationScreen(),
+          '/dashboard': (_) => const DashboardScreen(),
           '/profile': (_) => const ProfileScreen(),
         },
       ),
