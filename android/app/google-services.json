@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "760220232222",
+    "project_id": "uniswap-df20d",
+    "storage_bucket": "uniswap-df20d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:760220232222:android:2397b2ce14c8dbf4215c0f",
+        "android_client_info": {
+          "package_name": "com.tanjimscreation.uniswap"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAzVHvz0LbbaYLjFELYlY6sAMKL-qGiesE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

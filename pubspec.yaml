@@ -20,6 +20,9 @@ dependencies:
   # Typography
   google_fonts: ^6.1.0
 
+  # Firebase
+  firebase_core: ^2.27.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
