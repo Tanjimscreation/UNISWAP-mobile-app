@@ -47,6 +47,7 @@ class Product {
   final bool swapOnly;
   final String category;
   final String sellerName;
+  final String? sellerId;
   final DateTime listedAt;
 
   const Product({
@@ -58,8 +59,47 @@ class Product {
     this.swapOnly = false,
     this.category = 'General',
     this.sellerName = 'Siti Aisyah',
+    this.sellerId,
     required this.listedAt,
   });
+
+  Map<String, dynamic> toMap() => {
+        'title': title,
+        'priceRm': priceRm,
+        'condition': condition.name,
+        'imageUrl': imageUrl,
+        'swapOnly': swapOnly,
+        'category': category,
+        'sellerName': sellerName,
+        'sellerId': sellerId,
+        'listedAt': listedAt.toIso8601String(),
+      };
+
+  factory Product.fromMap(String id, Map<String, dynamic> d) {
+    final cond = ItemCondition.values.firstWhere(
+      (c) => c.name == (d['condition'] as String?),
+      orElse: () => ItemCondition.good,
+    );
+    final ts = d['listedAt'];
+    DateTime listed;
+    if (ts is String) {
+      listed = DateTime.tryParse(ts) ?? DateTime.now();
+    } else {
+      listed = DateTime.now();
+    }
+    return Product(
+      id: id,
+      title: (d['title'] ?? '') as String,
+      priceRm: (d['priceRm'] as num?)?.toDouble() ?? 0,
+      condition: cond,
+      imageUrl: (d['imageUrl'] ?? '') as String,
+      swapOnly: (d['swapOnly'] as bool?) ?? false,
+      category: (d['category'] ?? 'General') as String,
+      sellerName: (d['sellerName'] ?? '') as String,
+      sellerId: d['sellerId'] as String?,
+      listedAt: listed,
+    );
+  }
 }
 
 final List<Product> mockProducts = [

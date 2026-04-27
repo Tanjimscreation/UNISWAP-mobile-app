@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class AppUser {
   final String id;
   final String fullName;
@@ -35,6 +37,39 @@ class AppUser {
 
   String get campusLabel =>
       campus == 'KL' ? 'UTM Kuala Lumpur' : 'UTM Skudai';
+
+  Map<String, dynamic> toMap() => {
+        'fullName': fullName,
+        'email': email,
+        'faculty': faculty,
+        'campus': campus,
+        'phoneNumber': phoneNumber,
+        'avatarUrl': avatarUrl,
+        'trustScore': trustScore,
+        'successfulSwaps': successfulSwaps,
+        'totalListings': totalListings,
+        'verified': verified,
+        'memberSince': Timestamp.fromDate(memberSince),
+      };
+
+  factory AppUser.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final d = doc.data() ?? const <String, dynamic>{};
+    final ts = d['memberSince'];
+    return AppUser(
+      id: doc.id,
+      fullName: (d['fullName'] ?? '') as String,
+      email: (d['email'] ?? '') as String,
+      faculty: (d['faculty'] ?? '') as String,
+      campus: (d['campus'] ?? '') as String,
+      phoneNumber: d['phoneNumber'] as String?,
+      avatarUrl: d['avatarUrl'] as String?,
+      trustScore: (d['trustScore'] as num?)?.toDouble() ?? 5.0,
+      successfulSwaps: (d['successfulSwaps'] as num?)?.toInt() ?? 0,
+      totalListings: (d['totalListings'] as num?)?.toInt() ?? 0,
+      verified: (d['verified'] as bool?) ?? true,
+      memberSince: ts is Timestamp ? ts.toDate() : DateTime.now(),
+    );
+  }
 
   AppUser copyWith({
     String? id,

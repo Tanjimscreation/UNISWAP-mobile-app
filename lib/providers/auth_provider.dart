@@ -1,28 +1,28 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../models/user.dart';
+
 import '../models/product.dart';
+import '../models/user.dart';
+import '../services/firebase_service.dart';
 
+/// Auth + profile + listings provider, backed by Firebase Auth, Firestore
+/// (`users/{uid}`, `listings`) and Firebase Storage.
 class AuthProvider extends ChangeNotifier {
-  static const _kLoggedIn = 'utm_logged_in';
+  AuthProvider() {
+    _authSub = FirebaseService.auth.authStateChanges().listen(_onAuthChanged);
+  }
 
-  static final AppUser _demo = AppUser(
-    id: 'utm-001',
-    fullName: 'Siti Aisyah',
-    email: 'siti.aisyah@graduate.utm.my',
-    faculty: 'FC — Faculty of Computing',
-    campus: 'Skudai',
-    avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&crop=face',
-    trustScore: 4.9,
-    successfulSwaps: 27,
-    totalListings: 6,
-    verified: true,
-    memberSince: DateTime(2024, 9, 1),
-  );
+  // ── State ──
+  AppUser? _user;
+  bool _isLoggedIn = false;
+  List<Product> _listings = List<Product>.from(mockProducts);
 
-  AppUser? _user = _demo;
-  bool _isLoggedIn = true;
-  final List<Product> _listings = List<Product>.from(mockProducts);
+  StreamSubscription<User?>? _authSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _profileSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _listingsSub;
 
   // ── Getters ──
   AppUser? get user => _user;
@@ -41,10 +41,70 @@ class AuthProvider extends ChangeNotifier {
   static final RegExp _utmEmail =
       RegExp(r'^[a-zA-Z0-9._%+-]+@(graduate\.utm\.my|utm\.my)$');
 
-  bool isValidUTMEmail(String email) =>
+  /// Static so it can be unit-tested without needing Firebase initialized.
+  static bool isUTMEmail(String email) =>
       _utmEmail.hasMatch(email.trim().toLowerCase());
 
-  // ── Auth ──
+  bool isValidUTMEmail(String email) => isUTMEmail(email);
+
+  // ── Auth state plumbing ──
+  Future<void> _onAuthChanged(User? fbUser) async {
+    await _profileSub?.cancel();
+    _profileSub = null;
+
+    if (fbUser == null) {
+      _user = null;
+      _isLoggedIn = false;
+      _listings = List<Product>.from(mockProducts);
+      await _listingsSub?.cancel();
+      _listingsSub = null;
+      notifyListeners();
+      return;
+    }
+
+    _isLoggedIn = true;
+    // Live profile subscription.
+    _profileSub = FirebaseService.users.doc(fbUser.uid).snapshots().listen(
+      (snap) {
+        if (snap.exists) {
+          _user = AppUser.fromDoc(snap);
+        } else {
+          // Profile not yet created (e.g. mid-registration); fallback shell.
+          _user = AppUser(
+            id: fbUser.uid,
+            fullName: fbUser.displayName ?? '',
+            email: fbUser.email ?? '',
+            faculty: '',
+            campus: 'Skudai',
+            avatarUrl: fbUser.photoURL,
+            memberSince: fbUser.metadata.creationTime ?? DateTime.now(),
+          );
+        }
+        notifyListeners();
+      },
+    );
+
+    _attachListingsStream();
+  }
+
+  void _attachListingsStream() {
+    _listingsSub?.cancel();
+    _listingsSub = FirebaseService.listings
+        .orderBy('listedAt', descending: true)
+        .snapshots()
+        .listen((qs) {
+      if (qs.docs.isEmpty) {
+        // Keep mock catalog visible until the seller-economy boots.
+        _listings = List<Product>.from(mockProducts);
+      } else {
+        _listings =
+            qs.docs.map((d) => Product.fromMap(d.id, d.data())).toList();
+      }
+      notifyListeners();
+    });
+  }
+
+  // ── Auth actions ──
   Future<String?> register({
     required String email,
     required String fullName,
@@ -61,52 +121,114 @@ class AuthProvider extends ChangeNotifier {
     if (password.length < 6) return 'Password must be at least 6 characters.';
     if (faculty.isEmpty) return 'Please select your faculty.';
     if (campus.isEmpty) return 'Please select your campus.';
-    if (!acceptedTerms) return 'Please accept the Campus Safety & Fair Trade terms.';
+    if (!acceptedTerms) {
+      return 'Please accept the Campus Safety & Fair Trade terms.';
+    }
 
-    _user = AppUser(
-      id: 'utm-${DateTime.now().millisecondsSinceEpoch}',
-      fullName: fullName.trim(),
-      email: email.trim().toLowerCase(),
-      faculty: faculty,
-      campus: campus,
-      phoneNumber: phoneNumber,
-      trustScore: 5.0,
-      successfulSwaps: 0,
-      totalListings: 0,
-      memberSince: DateTime.now(),
-    );
-    _isLoggedIn = true;
-    await _persist();
-    notifyListeners();
-    return null;
+    try {
+      final cred = await FirebaseService.auth.createUserWithEmailAndPassword(
+        email: email.trim().toLowerCase(),
+        password: password,
+      );
+      final uid = cred.user!.uid;
+      await cred.user!.updateDisplayName(fullName.trim());
+
+      final profile = AppUser(
+        id: uid,
+        fullName: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        faculty: faculty,
+        campus: campus,
+        phoneNumber: phoneNumber,
+        trustScore: 5.0,
+        successfulSwaps: 0,
+        totalListings: 0,
+        memberSince: DateTime.now(),
+      );
+      await FirebaseService.users.doc(uid).set(profile.toMap());
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return _humanizeAuthError(e);
+    } catch (_) {
+      return 'Could not create your account. Please try again.';
+    }
   }
 
-  Future<String?> login({required String email, required String password}) async {
+  Future<String?> login({
+    required String email,
+    required String password,
+  }) async {
     if (!isValidUTMEmail(email)) return 'Please use a valid UTM email.';
     if (password.isEmpty) return 'Password is required.';
 
-    _user = _demo.copyWith(email: email.trim().toLowerCase());
-    _isLoggedIn = true;
-    await _persist();
-    notifyListeners();
-    return null;
+    try {
+      await FirebaseService.auth.signInWithEmailAndPassword(
+        email: email.trim().toLowerCase(),
+        password: password,
+      );
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return _humanizeAuthError(e);
+    } catch (_) {
+      return 'Could not sign in. Please try again.';
+    }
   }
 
   Future<void> logout() async {
-    _isLoggedIn = false;
-    _user = null;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_kLoggedIn);
-    notifyListeners();
+    await FirebaseService.auth.signOut();
   }
 
-  Future<void> _persist() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_kLoggedIn, _isLoggedIn);
+  // ── Listings ──
+  Future<void> addListing(Product p) async {
+    final fbUser = FirebaseService.auth.currentUser;
+    final enriched = Product(
+      id: p.id,
+      title: p.title,
+      priceRm: p.priceRm,
+      condition: p.condition,
+      imageUrl: p.imageUrl,
+      swapOnly: p.swapOnly,
+      category: p.category,
+      sellerName: _user?.fullName ?? p.sellerName,
+      sellerId: fbUser?.uid,
+      listedAt: p.listedAt,
+    );
+    if (fbUser == null) {
+      // Offline / unauthenticated fallback — keep local-only listing.
+      _listings = [enriched, ..._listings];
+      notifyListeners();
+      return;
+    }
+    await FirebaseService.listings.add(enriched.toMap());
   }
 
-  void addListing(Product p) {
-    _listings.insert(0, p);
-    notifyListeners();
+  // ── Helpers ──
+  String _humanizeAuthError(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'email-already-in-use':
+        return 'That UTM email is already registered.';
+      case 'invalid-email':
+        return 'Email address looks invalid.';
+      case 'weak-password':
+        return 'Password is too weak. Use at least 6 characters.';
+      case 'user-not-found':
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'Email or password is incorrect.';
+      case 'network-request-failed':
+        return 'No internet connection. Please try again.';
+      case 'too-many-requests':
+        return 'Too many attempts. Please wait a moment and retry.';
+      default:
+        return e.message ?? 'Authentication error (${e.code}).';
+    }
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    _profileSub?.cancel();
+    _listingsSub?.cancel();
+    super.dispose();
   }
 }
